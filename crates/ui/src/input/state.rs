@@ -643,6 +643,9 @@ impl InputState {
         self.replace_text(value, window, cx);
         self.disabled = was_disabled;
         self.history.ignore = false;
+        // The text is new: what was typed before is not undone into it. Its offsets are
+        // the old text's, and it may be another document's, or a secret's.
+        self.history.clear();
 
         // Ensure cursor to start when set text
         if self.mode.is_single_line() {
