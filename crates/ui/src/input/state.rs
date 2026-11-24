@@ -5,7 +5,7 @@
 use anyhow::Result;
 use gpui::{
     Action, App, AppContext, Bounds, ClipboardItem, Context, Entity, EntityInputHandler,
-    EventEmitter, FocusHandle, Focusable, InteractiveElement as _, IntoElement, KeyBinding,
+    EventEmitter, FocusHandle, Focusable, HighlightStyle, InteractiveElement as _, IntoElement, KeyBinding,
     KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _,
     Pixels, Point, Render, ScrollHandle, ScrollWheelEvent, SharedString, Styled as _, Subscription,
     Task, UTF16Selection, Window, actions, div, point, prelude::FluentBuilder as _, px,
@@ -257,6 +257,18 @@ impl LastLayout {
     }
 }
 
+/// Styles for a field's own text (added in this vendored copy): given the whole text,
+/// the byte ranges to style and how. Ranges must lie on character boundaries; where they
+/// overlap, a later one is drawn over an earlier one, and text in no range is drawn
+/// plainly. It is asked each time the field is drawn, so the styles always match the
+/// text as it is, after typing, undo, paste or `set_value`.
+///
+/// Only for a field that is not a code editor (which styles its text from its grammar).
+/// The styles may change the colour, weight, style, background, underline and
+/// strikethrough of the text, not its font or size: every line of a field has one
+/// size and one height.
+pub type TextStyles = Rc<dyn Fn(&str, &App) -> Vec<(Range<usize>, HighlightStyle)>>;
+
 /// InputState to keep editing state of the [`super::Input`].
 pub struct InputState {
     pub(super) focus_handle: FocusHandle,
@@ -302,6 +314,8 @@ pub struct InputState {
     /// The mask pattern for formatting the input text
     pub(crate) mask_pattern: MaskPattern,
     pub(super) placeholder: SharedString,
+    /// Styles for the text, if given (`TextStyles`).
+    pub(super) text_styles: Option<TextStyles>,
 
     /// Popover
     diagnostic_popover: Option<Entity<DiagnosticPopover>>,
@@ -397,6 +411,7 @@ impl InputState {
             deferred_scroll_offset: None,
             preferred_column: None,
             placeholder: SharedString::default(),
+            text_styles: None,
             mask_pattern: MaskPattern::default(),
             lsp: Lsp::default(),
             diagnostic_popover: None,
@@ -461,6 +476,26 @@ impl InputState {
         debug_assert!(self.mode.is_multi_line());
         self.searchable = searchable;
         self
+    }
+
+    /// Style the field's own text with `styles` (see `TextStyles`). Not for a code
+    /// editor, which styles its text from its grammar.
+    pub fn text_styles(mut self, styles: TextStyles) -> Self {
+        debug_assert!(!self.mode.is_code_editor());
+        self.text_styles = Some(styles);
+        self
+    }
+
+    /// Whether the field's own text is given styles (`text_styles`).
+    pub fn has_text_styles(&self) -> bool {
+        self.text_styles.is_some()
+    }
+
+    /// Style the field's own text with `styles`, or no longer (`None`).
+    pub fn set_text_styles(&mut self, styles: Option<TextStyles>, cx: &mut Context<Self>) {
+        debug_assert!(!self.mode.is_code_editor());
+        self.text_styles = styles;
+        cx.notify();
     }
 
     /// Set placeholder

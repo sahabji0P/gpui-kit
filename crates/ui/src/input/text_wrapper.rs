@@ -487,6 +487,14 @@ impl LineLayout {
         cx: &mut App,
     ) {
         for (ix, line) in self.wrapped_lines.iter().enumerate() {
+            // Added in this vendored copy: a run's background (`HighlightStyle::
+            // background_color`) is painted, under its glyphs.
+            _ = line.paint_background(
+                pos + point(px(0.), ix * line_height),
+                line_height,
+                window,
+                cx,
+            );
             _ = line.paint(
                 pos + point(px(0.), ix * line_height),
                 line_height,

@@ -750,7 +750,12 @@ impl TextElement {
                 diagnostics,
                 ..
             } => (highlighter.borrow(), diagnostics),
-            _ => return None,
+            // Added in this vendored copy: styles given for the field's own text.
+            _ => {
+                let styler = state.text_styles.clone().filter(|_| !state.masked)?;
+                let styles = styler(&text.to_string(), cx);
+                return Some(styles_for_visible(styles, &visible_byte_range));
+            }
         };
         let highlighter = highlighter.as_ref()?;
 
@@ -920,10 +925,16 @@ impl Element for TextElement {
         cx: &mut App,
     ) -> Self::PrepaintState {
         let style = window.text_style();
-        let font = style.font();
+        let mut font = style.font();
         let text_size = style.font_size.to_pixels(window.rem_size());
 
         self.state.update(cx, |state, cx| {
+            // Added in this vendored copy: text given styles (`TextStyles`) may be drawn
+            // bold, which is wider; it is wrapped as if bold, so a bold stretch never
+            // runs past the field's edge. Plain text then wraps a little early.
+            if state.text_styles.is_some() && !state.mode.is_code_editor() {
+                font.weight = gpui::FontWeight::BOLD;
+            }
             state.text_wrapper.set_font(font, text_size, cx);
             state.text_wrapper.prepare_if_need(&state.text, cx);
         });
@@ -1489,6 +1500,26 @@ impl Element for TextElement {
 
         self.paint_mouse_listeners(window, cx);
     }
+}
+
+/// Added in this vendored copy: the styles given for a field's text (`TextStyles`) as
+/// the highlighter's are, ranges side by side with no gap that cover exactly the visible
+/// bytes, each one clipped to them; where none is given the text is plain.
+pub(super) fn styles_for_visible(
+    styles: Vec<(Range<usize>, HighlightStyle)>,
+    visible: &Range<usize>,
+) -> Vec<(Range<usize>, HighlightStyle)> {
+    let clipped: Vec<_> = styles
+        .into_iter()
+        .filter_map(|(range, style)| {
+            let range = range.start.max(visible.start)..range.end.min(visible.end);
+            (range.start < range.end).then_some((range, style))
+        })
+        .collect();
+    if clipped.is_empty() {
+        return vec![(visible.clone(), HighlightStyle::default())];
+    }
+    crate::highlighter::unique_styles(visible, clipped)
 }
 
 /// Get the runs for the given range.
